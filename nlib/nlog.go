@@ -8,40 +8,33 @@ import (
 	"io"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 )
 
-type Config struct {
-	// Enable console logging
-	OutputConsole bool
-	// FileLoggingEnabled makes the framework log to a file
-	OutputFile bool
-	// EncodeLogsAsJson makes the log framework log JSON
-	ModeJson bool
-	// Directory to log to when file logging is enabled
-	LogPath string
-	// Filename is the name of the logfile which will be placed inside the directory
-	LogFile string
-	// MaxSize the max size in MB of the logfile before it's rolled
-	MaxSize int
-	// MaxBackups the max number of rolled files to keep
-	MaxBackups int
-	// MaxAge the max age in days to keep a logfile
-	MaxAge int
+type NLogConfig struct {
+	OutputConsole bool   // Enable console logging
+	OutputFile    bool   // FileLoggingEnabled makes the framework log to a file
+	LogPath       string // Directory to log to when file logging is enabled
+	LogFile       string // Filename is the name of the logfile which will be placed inside the directory
+	MaxSize       int    // MaxSize the max size in MB of the logfile before it's rolled
+	MaxBackups    int    // MaxBackups the max number of rolled files to keep
+	MaxAge        int    // MaxAge the max age in days to keep a logfile
 }
 
 type NLog struct {
 	*zerolog.Logger
 }
 
-func Configure(config Config) *NLog {
+func NewLog(config NLogConfig) *NLog {
 	var writers []io.Writer
 	if config.OutputFile {
 		writer := zerolog.ConsoleWriter{
 			Out: newRollingFile(config),
 		}
-		writer.TimeFormat = time.TimeOnly
+		writer.FormatTimestamp = defaultTimestamp()
+		writer.FormatCaller = defaultCaller(false)
 		writer.FormatLevel = defaultFormatLevel(false)
 		writers = append(writers, writer)
 	}
@@ -49,14 +42,15 @@ func Configure(config Config) *NLog {
 		writer := zerolog.ConsoleWriter{
 			Out: os.Stderr,
 		}
-		writer.TimeFormat = time.TimeOnly
+		writer.FormatTimestamp = defaultTimestamp()
+		writer.FormatCaller = defaultCaller(false)
 		writer.FormatLevel = defaultFormatLevel(false)
 		writers = append(writers, writer)
 	}
 	multiWriter := io.MultiWriter(writers...)
-	logger := zerolog.New(multiWriter).With().Timestamp().Logger()
+	logger := zerolog.New(multiWriter).With().Timestamp().Caller().Logger()
 	logger.Info().Bool("fileLogging", config.OutputFile).
-		Bool("modeJson", config.ModeJson).
+		Bool("consoleLogging", config.OutputConsole).
 		Str("logPath", config.LogPath).
 		Str("logFile", config.LogFile).
 		Int("maxSizeMB", config.MaxSize).
@@ -68,17 +62,18 @@ func Configure(config Config) *NLog {
 	}
 }
 
-func newRollingFile(config Config) io.Writer {
+func newRollingFile(config NLogConfig) io.Writer {
 	if err := os.MkdirAll(config.LogPath, 0744); err != nil {
 		log.Error().Err(err).Str("path", config.LogPath).Msg("can't create log directory")
 		return nil
 	}
-	return &lumberjack.Logger{
+	writer := &lumberjack.Logger{
 		Filename:   path.Join(config.LogPath, config.LogFile),
 		MaxBackups: config.MaxBackups,
 		MaxSize:    config.MaxSize,
 		MaxAge:     config.MaxAge,
 	}
+	return writer
 }
 
 const (
@@ -94,6 +89,23 @@ const (
 	colorDarkGray = 90
 )
 
+func defaultCaller(noColor bool) zerolog.Formatter {
+	return func(i interface{}) string {
+		var caller string
+		if cc, ok := i.(string); ok {
+			caller = cc
+		}
+		if len(caller) > 0 {
+			if cwd, err := os.Getwd(); err == nil {
+				if rel, err := filepath.Rel(cwd, caller); err == nil {
+					caller = rel
+				}
+			}
+		}
+		return fmt.Sprintf("%26s >", caller)
+	}
+}
+
 func defaultFormatLevel(noColor bool) zerolog.Formatter {
 	return func(i interface{}) string {
 		var l string
@@ -108,11 +120,11 @@ func defaultFormatLevel(noColor bool) zerolog.Formatter {
 			case zerolog.LevelWarnValue:
 				l = colorize("WRN", colorRed, noColor)
 			case zerolog.LevelErrorValue:
-				l = colorize("ERR", colorRed, noColor)
+				l = colorizeBoth("ERR", colorRed, colorBold, noColor)
 			case zerolog.LevelFatalValue:
-				l = colorize("FTL", colorRed, noColor)
+				l = colorizeBoth("FTL", colorRed, colorBold, noColor)
 			case zerolog.LevelPanicValue:
-				l = colorize("PNC", colorRed, noColor)
+				l = colorizeBoth("PNC", colorRed, colorBold, noColor)
 			default:
 				l = colorize(ll, colorBold, noColor)
 			}
@@ -127,14 +139,31 @@ func defaultFormatLevel(noColor bool) zerolog.Formatter {
 	}
 }
 
+func defaultTimestamp() zerolog.Formatter {
+	return func(i interface{}) string {
+		t := time.Now().Local()
+		return fmt.Sprintf("%02d:%02d:%02d.%03d", t.Hour(), t.Minute(), t.Second(), t.UnixMilli()%1000)
+	}
+}
+
 func colorize(s interface{}, c int, disabled bool) string {
 	e := os.Getenv("NO_COLOR")
 	if e != "" {
 		disabled = true
 	}
-
 	if disabled {
 		return fmt.Sprintf("|%s|", s)
 	}
 	return fmt.Sprintf("\x1b[%dm|%v|\x1b[0m", c, s)
+}
+
+func colorizeBoth(s interface{}, c1 int, c2 int, disabled bool) string {
+	e := os.Getenv("NO_COLOR")
+	if e != "" {
+		disabled = true
+	}
+	if disabled {
+		return fmt.Sprintf("|%s|", s)
+	}
+	return fmt.Sprintf("\x1b[%dm\x1b[%dm|%v|\x1b[0m", c1, c2, s)
 }
