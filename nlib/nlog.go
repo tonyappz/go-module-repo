@@ -16,6 +16,7 @@ import (
 type NLogConfig struct {
 	OutputConsole bool   // Enable console logging
 	OutputFile    bool   // FileLoggingEnabled makes the framework log to a file
+	LogLevel      string // Log Level to store file or console
 	LogPath       string // Directory to log to when file logging is enabled
 	LogFile       string // Filename is the name of the logfile which will be placed inside the directory
 	MaxSize       int    // MaxSize the max size in MB of the logfile before it's rolled
@@ -49,6 +50,18 @@ func NewLog(config NLogConfig) *NLog {
 	}
 	multiWriter := io.MultiWriter(writers...)
 	logger := zerolog.New(multiWriter).With().Timestamp().Caller().Logger()
+	switch config.LogLevel {
+	case "debug":
+		logger.Level(zerolog.DebugLevel)
+	case "info":
+		logger.Level(zerolog.InfoLevel)
+	default:
+		fallthrough
+	case "warn":
+		logger.Level(zerolog.WarnLevel)
+	case "error":
+		logger.Level(zerolog.ErrorLevel)
+	}
 	logger.Info().Bool("fileLogging", config.OutputFile).
 		Bool("consoleLogging", config.OutputConsole).
 		Str("logPath", config.LogPath).
