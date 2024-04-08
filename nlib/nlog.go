@@ -56,6 +56,7 @@ func NewLog(config NLogConfig) *NLog {
 	case "info":
 		logger.Level(zerolog.InfoLevel)
 	default:
+		config.LogLevel = "warn"
 		fallthrough
 	case "warn":
 		logger.Level(zerolog.WarnLevel)
@@ -64,6 +65,7 @@ func NewLog(config NLogConfig) *NLog {
 	}
 	logger.Info().Bool("fileLogging", config.OutputFile).
 		Bool("consoleLogging", config.OutputConsole).
+		Str("logLevel", config.LogLevel).
 		Str("logPath", config.LogPath).
 		Str("logFile", config.LogFile).
 		Int("maxSizeMB", config.MaxSize).
